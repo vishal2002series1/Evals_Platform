@@ -1,0 +1,11 @@
+query_id,category,hard_fail,hard_fail_ids,tone_score,prediction_flag,guarantee_flag,disclaimer_required,disclaimer_present
+1,informational,False,,5,False,False,False,
+2,informational,False,,5,False,False,False,
+3,informational,False,,5,False,False,False,
+4,informational,False,,5,False,False,False,
+5,informational,False,,5,False,False,False,
+6,informational,False,,5,False,False,False,
+7,informational,False,,5,False,False,False,
+8,informational,False,,5,False,False,False,
+9,informational,False,,5,False,False,False,
+10,informational,False,,5,False,False,False,

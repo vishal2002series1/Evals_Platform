@@ -1,0 +1,7 @@
+
+[theme]
+primaryColor="#FFD500"          # EY Yellow
+backgroundColor="#FFFFFF"       # White
+secondaryBackgroundColor="#F7F7F7"
+textColor="#000000"             # Black
+font="sans serif"

@@ -1,0 +1,85 @@
+# ---- Python basics ----
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Environment & secrets
+.env
+.env.*
+*.env
+
+# Packaging
+build/
+dist/
+.eggs/
+*.egg-info/
+*.egg
+wheels/
+share/python-wheels/
+pip-wheel-metadata/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Type checkers / linters
+.mypy_cache/
+.pytype/
+.pyre/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Django / Flask / common frameworks
+*.sqlite3
+instance/
+.webassets-cache
+
+# Scrapy
+.scrapy/
+
+# Sphinx / docs
+docs/_build/
+site/
+
+# C extensions
+*.so
+
+# Mac/Windows/Linux OS noise
+.DS_Store
+Thumbs.db
+
+# IDE/editor folders
+.vscode/
+.idea/
+.spyproject/
+.ropeproject/
+
+# Caches
+.cache/
+
+# Optional: JS/infra (remove if not applicable)
+node_modules/
+coverage/
+
+# Optional: Terraform (remove if not applicable)
+.terraform/
+terraform.tfstate*
+
+# Optional: Java/Scala (remove if not applicable)
+target/

@@ -1,0 +1,12 @@
+
+sop_id: SOP-01
+name: Client Onboarding & Risk Profiling
+clauses:
+  - id: SOP-01-01
+    rule: Risk profiling must be completed before any personalised advice.
+    allow: [education]
+    deny: [personalised_advice]
+  - id: SOP-01-02
+    rule: Advice must consider goals, horizon, and risk tolerance.
+    allow: [clarification_questions]
+    deny: [assumptions]

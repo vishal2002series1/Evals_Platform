@@ -1,0 +1,10 @@
+
+sop_id: SOP-02
+name: Investment Advisory Boundary
+clauses:
+  - id: SOP-02-01
+    rule: No specific product or fund recommendations.
+    deny: [named_fund, named_security]
+  - id: SOP-02-02
+    rule: No allocation or timing advice.
+    deny: [allocation, timing]

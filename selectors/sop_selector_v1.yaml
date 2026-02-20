@@ -1,0 +1,104 @@
+selector_metadata:
+  name: sop_snippet_selector
+  version: '1.0'
+  created_date: '2026-02-02'
+  notes: Maps expected tags to SOP clause IDs for snippet injection. Orchestrator should fetch clause texts by ID.
+tag_to_clause_ids:
+  REFUSE_SPECIFIC:
+  - SOP-02.C2
+  - SOP-02.C3
+  - SOP-02.C4
+  - SOP-02.C5
+  - SOP-08.C2
+  PII_SAFE:
+  - SOP-06.C1
+  - SOP-06.C2
+  - SOP-06.C3
+  - SOP-06.C5
+  EMPATHY:
+  - SOP-04.C3
+  - SOP-04.C1
+  - SOP-07.C2
+  - SOP-07.C4
+  - SOP-07.C1
+  - SOP-08.C3
+  TONE_NEUTRAL:
+  - SOP-07.C2
+  - SOP-07.C4
+  - SOP-07.C1
+  - SOP-04.C3
+  NO_PREDICTION:
+  - SOP-04.C2
+  - SOP-05.C3
+  - SOP-05.C4
+  - SOP-09.C2
+  NO_GUARANTEE:
+  - SOP-05.C2
+  - SOP-07.C3
+  - SOP-04.C2
+  DISCLAIM:
+  - SOP-02.C3
+  - SOP-02.C4
+  - SOP-05.C3
+  - SOP-05.C4
+  - SOP-01.C4
+  - SOP-01.C7
+  - SOP-01.C8
+  PROCESS_FRAMING:
+  - SOP-01.C4
+  - SOP-01.C1
+  - SOP-01.C5
+  - SOP-03.C2
+  - SOP-03.C1
+  - SOP-10.C1
+  - SOP-10.C2
+  - SOP-10.C3
+  CLARIFY:
+  - SOP-01.C4
+  - SOP-01.C1
+  - SOP-03.C2
+  DEFER_ADVISOR:
+  - SOP-02.C4
+  - SOP-02.C2
+  - SOP-02.C3
+  - SOP-02.C5
+  - SOP-08.C2
+  - SOP-08.C1
+  - SOP-01.C4
+  NO_ADVICE:
+  - SOP-02.C2
+  - SOP-02.C3
+  - SOP-01.C2
+  - SOP-01.C3
+  - SOP-03.C3
+  - SOP-03.C5
+  EDU_ONLY:
+  - SOP-02.C1
+  - SOP-05.C1
+  - SOP-09.C1
+  ESCALATE:
+  - SOP-08.C1
+  - SOP-08.C3
+  - SOP-04.C5
+  - SOP-06.C5
+  - SOP-06.C1
+  - SOP-06.C2
+  - SOP-06.C3
+snippet_building_rules:
+  max_total_clauses: 12
+  per_tag_limit: 4
+  priority_order:
+  - REFUSE_SPECIFIC
+  - PII_SAFE
+  - EMPATHY
+  - NO_PREDICTION
+  - NO_GUARANTEE
+  - DISCLAIM
+  - DEFER_ADVISOR
+  - PROCESS_FRAMING
+  - CLARIFY
+  - TONE_NEUTRAL
+  - NO_ADVICE
+  - EDU_ONLY
+  - ESCALATE
+  dedupe: true

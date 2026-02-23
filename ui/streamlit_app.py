@@ -76,11 +76,31 @@ print("File exists:", os.path.isfile("ui/assets/ey_logo.png"))
 print("Full path exists:", os.path.isfile(str(ROOT / 'ui/assets/ey_logo.png')))
 
 # ================================
+#   NAVIGATION CALLBACK
+# ================================
+def go_to_results():
+    st.session_state["current_page"] = "Results Explorer"
+
+# ================================
 #   API SETTINGS
 # ================================
 API = st.sidebar.text_input("API Base URL", value="http://localhost:8000")
 
 st.title("Wealth LLM Evaluation Workbench")
+
+# page = st.sidebar.radio(
+#     "Navigate",
+#     [
+#         "Run Evaluation",
+#         "Evaluate Single",
+#         "Results Explorer",
+       
+#     ]
+# )
+
+# Initialize navigation state
+if "current_page" not in st.session_state:
+    st.session_state["current_page"] = "Run Evaluation"
 
 page = st.sidebar.radio(
     "Navigate",
@@ -88,8 +108,8 @@ page = st.sidebar.radio(
         "Run Evaluation",
         "Evaluate Single",
         "Results Explorer",
-       
-    ]
+    ],
+    key="current_page" # This links the radio button to the session state
 )
 
 def api_get(path):
@@ -108,26 +128,48 @@ def api_post(path, payload):
 # ================================
 if page == "Run Evaluation":
     st.subheader("Batch Run")
+    
+    # Initialize run states if they don't exist
+    if "run_status_text" not in st.session_state:
+        st.session_state["run_status_text"] = ""
+    if "run_progress" not in st.session_state:
+        st.session_state["run_progress"] = 0.0
+    if "run_complete" not in st.session_state:
+        st.session_state["run_complete"] = False
+    
     col1, col2, col3 = st.columns(3)
     limit = col1.number_input("Number of queries", min_value=1, max_value=1000, value=100, step=10)
     use_judge = col2.checkbox("Use LLM Judge", value=True)
     run_btn = col3.button("Run Now", type="primary")
 
-    # if run_btn:
-    #     with st.spinner("Running batch evaluation..."):
-    #         out = api_post("/run", {"limit": int(limit), "use_judge": bool(use_judge)})
-    #     st.success(f"Run complete: {out['run_id']}")
-    #     # Save the new artifact paths to session state
-    #     st.session_state["latest_jsonl"] = out["results_jsonl"]
-    #     st.session_state["latest_csv"] = out["results_csv"]
-    #     st.write("Artifacts")
-    #     st.code(out["results_jsonl"])
-    #     st.code(out["results_csv"])
-    #     st.info("Tip: Go to Results Explorer to load these files and drill down.")
+    # Persistent placeholders for UI elements
+    progress_bar = st.progress(st.session_state["run_progress"])
+    status_text = st.empty()
+    status_text.text(st.session_state["run_status_text"])
+    
+    # Display artifacts if a run was previously completed
+    if st.session_state["run_complete"]:
+        st.success(f"Run complete: {st.session_state.get('last_run_id', '')}")
+        st.write("Artifacts")
+        st.code(st.session_state.get('latest_jsonl', ''))
+        st.code(st.session_state.get('latest_csv', ''))
+        
+        # The button that jumps to Results Explorer
+        # The button that jumps to Results Explorer
+        st.button(
+            "📊 View Results in Explorer", 
+            type="primary", 
+            on_click=go_to_results
+        )
 
     if run_btn:
         import uuid
         import csv
+        
+        # Reset state for new run
+        st.session_state["run_complete"] = False
+        st.session_state["run_progress"] = 0.0
+        progress_bar.progress(0.0)
         
         # 1. Fetch config to locate the dataset
         cfg = api_get("/config")
@@ -139,12 +181,10 @@ if page == "Run Evaluation":
         queries_to_run = dataset["queries"][:int(limit)]
         total = len(queries_to_run)
         
-        # 2. Initialize UI elements for progress tracking
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
         # 3. Setup output files
         run_id = f"run_{uuid.uuid4().hex[:10]}"
+        st.session_state["last_run_id"] = run_id
+        
         out_dir = ROOT / "outputs"
         out_dir.mkdir(exist_ok=True)
         
@@ -156,8 +196,10 @@ if page == "Run Evaluation":
         # 4. Loop through queries and evaluate one-by-one
         with open(jsonl_path, "w", encoding="utf-8") as jf:
             for i, item in enumerate(queries_to_run):
-                # Update status text
-                status_text.text(f"Evaluating {i+1} of {total}...")
+                # Update status text in UI and State
+                msg = f"Evaluating {i+1} of {total}..."
+                status_text.text(msg)
+                st.session_state["run_status_text"] = msg
                 
                 # Call the backend for a single evaluation using query_id
                 res = api_post("/evaluate", {"query_id": item["id"], "use_judge": bool(use_judge)})
@@ -200,8 +242,10 @@ if page == "Run Evaluation":
                     "sop_snippets": _as_str(res.get("sop_snippets")),
                 })
                 
-                # Update progress bar
-                progress_bar.progress((i + 1) / total)
+                # Update progress bar in UI and State
+                current_progress = (i + 1) / total
+                progress_bar.progress(current_progress)
+                st.session_state["run_progress"] = current_progress
                 
         # 5. Write out the compiled CSV file
         with open(csv_path, "w", encoding="utf-8", newline="") as cf:
@@ -209,7 +253,9 @@ if page == "Run Evaluation":
             writer.writeheader()
             writer.writerows(csv_rows)
             
-        status_text.text("Batch evaluation complete! ✅")
+        final_msg = "Batch evaluation complete! ✅"
+        status_text.text(final_msg)
+        st.session_state["run_status_text"] = final_msg
         
         # 6. Save relative paths to session state so Results Explorer auto-fills
         rel_jsonl = f"outputs/{jsonl_path.name}"
@@ -217,13 +263,10 @@ if page == "Run Evaluation":
         
         st.session_state["latest_jsonl"] = rel_jsonl
         st.session_state["latest_csv"] = rel_csv
+        st.session_state["run_complete"] = True
         
-        st.success(f"Run complete: {run_id}")
-        st.write("Artifacts")
-        st.code(rel_jsonl)
-        st.code(rel_csv)
-        st.info("Tip: Go to Results Explorer to load these files and drill down.")
-
+        # Rerun to cleanly display the artifacts and the new "View Results" button
+        st.rerun()
 
 elif page == "Evaluate Single":
     st.subheader("Single Query Evaluation")
@@ -659,28 +702,25 @@ elif page == "Results Explorer":
     if col2.button("Load CSV"):
         st.session_state["df_csv"] = pd.read_csv(csv_path)
 
+    # ==========================================
+    # CSV SUMMARY SECTION
+    # ==========================================
     if "df_csv" in st.session_state:
         st.markdown("### Summary (CSV)")
         st.markdown("""
-                **This output is generated by the Heuristic Evaluation
-                    Rule‑based engine detecting:
-
-                    - **HF1 — Product Recommendation**  
-                    - **HF2 — Allocation / Timing Advice**  
-                    - **HF3 — PII Assumption or Solicitation**  
-                    - **HF4 — Guarantees / Certainty Language**  
-                    - **HF5 — Prediction‑as‑Fact**
-
-                    Also checks tone, risk language, and required disclaimers.
-
-                    These are strict, deterministic compliance checks applied before LLM‑based scoring..
-            """)
+                **This output is generated by the Heuristic Evaluation**
+                Rule‑based engine detecting:
+                - **HF1 — Product Recommendation** - **HF2 — Allocation / Timing Advice** - **HF3 — PII Assumption or Solicitation** - **HF4 — Guarantees / Certainty Language** - **HF5 — Prediction‑as‑Fact**
+                
+                Also checks tone, risk language, and required disclaimers.
+                These are strict, deterministic compliance checks applied before LLM‑based scoring.
+        """)
         dfc = st.session_state["df_csv"]
 
-    # --- FIX: normalize problematic string columns ---
+        # --- FIX: normalize problematic string columns ---
         def _norm_str_col(df, col):
             if col in df.columns:
-             df[col] = df[col].astype(str).replace({"nan": ""}).fillna("")
+                df[col] = df[col].astype(str).replace({"nan": ""}).fillna("")
 
         for c in ("judge_output_raw", "judge_prompt", "candidate_response", "sop_snippets"):
             _norm_str_col(dfc, c)
@@ -693,14 +733,11 @@ elif page == "Results Explorer":
 
         st.dataframe(dfc, use_container_width=True)
 
-        
-
-# After: dfc = st.session_state["df_csv"]
-        for c in ("judge_output_raw", "judge_prompt", "candidate_response", "sop_snippets"):
-            _norm_str_col(dfc, c)
-
-        if "df_jsonl" in st.session_state:
-            st.markdown("### Drilldown (JSONL)")
+    # ==========================================
+    # JSONL DRILLDOWN SECTION
+    # ==========================================
+    if "df_jsonl" in st.session_state:
+        st.markdown("### Drilldown (JSONL)")
         df = st.session_state["df_jsonl"]
 
         cat = st.selectbox("Filter category", ["(all)"] + sorted(df["category"].dropna().unique().tolist()))
@@ -710,165 +747,150 @@ elif page == "Results Explorer":
         if cat != "(all)":
             dff = dff[dff["category"] == cat]
         if hard != "(all)":
-            dff = df[df["hard_fail"] == hard]
+            dff = dff[dff["hard_fail"] == hard] # Fix: Use dff instead of df here to stack filters
 
-        st.dataframe(
-            dff[["query_id", "category", "query", "heuristic.hard_fail_ids"]],
-            use_container_width=True
-        )
+        if dff.empty:
+            st.warning("No results match the selected filters.")
+        else:
+            st.dataframe(
+                dff[["query_id", "category", "query", "heuristic.hard_fail_ids"]],
+                use_container_width=True
+            )
 
-        pick = st.number_input(
-            "Select query_id to view",
-            min_value=int(dff["query_id"].min()),
-            max_value=int(dff["query_id"].max()),
-            value=int(dff["query_id"].iloc[0])
-        )
-        row = dff[dff["query_id"] == pick].iloc[0].to_dict()
+            pick = st.number_input(
+                "Select query_id to view",
+                min_value=int(dff["query_id"].min()),
+                max_value=int(dff["query_id"].max()),
+                value=int(dff["query_id"].iloc[0])
+            )
+            row = dff[dff["query_id"] == pick].iloc[0].to_dict()
 
-        st.markdown("#### Candidate Response")
-        st.write(row.get("candidate_response", ""))
+            st.markdown("#### Candidate Response")
+            st.write(row.get("candidate_response", ""))
 
-     
-        # ---------- SAFE PARSER HELPERS ----------
-# ---------- SAFE PARSER HELPERS ----------
-        def _as_dict_maybe_json(value, default=None):
-            """
-            Returns a dict from either:
-              - already-a-dict input
-              - JSON string input
-              - None/NaN (returns default)
-            """
-            if default is None:
-                default = {}
-            if value is None:
-                return default
-            # For pandas rows, NaN can appear; treat as missing
-            try:
-                import math
-                if isinstance(value, float) and math.isnan(value):
+            # ---------- SAFE PARSER HELPERS ----------
+            def _as_dict_maybe_json(value, default=None):
+                """
+                Returns a dict from either:
+                  - already-a-dict input
+                  - JSON string input
+                  - None/NaN (returns default)
+                """
+                if default is None:
+                    default = {}
+                if value is None:
                     return default
-            except Exception:
-                pass
-
-            if isinstance(value, dict):
-                return value
-            if isinstance(value, str):
-                value = value.strip()
-                if not value:
-                    return default
+                # For pandas rows, NaN can appear; treat as missing
                 try:
-                    return json.loads(value)
+                    import math
+                    if isinstance(value, float) and math.isnan(value):
+                        return default
                 except Exception:
-                    # if it's not valid JSON, just return it as a string wrapped
-                    return {"_raw": value}
-            # Fallback: not dict or str
-            return {"_raw": value}
-        # -----------------------------------------
+                    pass
 
-
-
-        with st.expander("Judge output (raw)"):
-
-            st.markdown("""
-                **This output is generated by the LLM-based Judge model.**  
-                It evaluates the assistant’s response on dimensions like Intent, Boundary, Risk/Disclosures, Tone, No-Prediction/No-Guarantee, and Groundedness (if RAG context exists) on 0 - 5.
-            """)
-
-            import re
-            import json as _json
-            import pandas as pd
-
-            st.markdown("### Judge Evaluation (Clean Table)")
-
-            def _strip_md_fence(raw: str) -> str:
-                """Remove ```json ... ``` fences if present."""
-                if not isinstance(raw, str):
-                    return raw
-                s = raw.strip()
-                m = re.match(r"^```[a-zA-Z]*\s*(.*?)\s*```$", s, re.S)
-                return m.group(1).strip() if m else s
-
-            # 1) Get judge_struct from the row (can be dict/str/NaN)
-            j = _as_dict_maybe_json(row.get("judge_struct"), default={})
-
-            # 2) If it's still empty, try to derive from judge_output_raw
-            if not j or (isinstance(j, dict) and not j.keys()):
-                raw = row.get("judge_output_raw", "")
-                if isinstance(raw, str) and raw.strip():
+                if isinstance(value, dict):
+                    return value
+                if isinstance(value, str):
+                    value = value.strip()
+                    if not value:
+                        return default
                     try:
-                        j = _json.loads(_strip_md_fence(raw))
+                        return json.loads(value)
                     except Exception:
-                        j = {}
+                        return {"_raw": value}
+                return {"_raw": value}
 
-            # If still nothing, show a friendly message and bail
-            if not j or (isinstance(j, dict) and not j.keys()):
-                st.warning("No judge results found for this row.")
-            else:
-                # Human‑readable dimension labels (use plain & so Markdown renders correctly)
-                dim_map = {
-                    "D1": "D1 – Intent & Helpfulness",
-                    "D2": "D2 – Advisory Boundary",
-                    "D3": "D3 – Risk & Compliance",
-                    "D4": "D4 – Tone & Client Safety",
-                    "D5": "D5 – No Prediction / Guarantee",
-                    "D6": "D6 – Groundedness",
-                    # Some models emit natural keys instead of D1..D6
-                    "intent": "D1 – Intent & Helpfulness",
-                    "advisory_boundary": "D2 – Advisory Boundary",
-                    "risk_compliance": "D3 – Risk & Compliance",
-                    "tone": "D4 – Tone & Client Safety",
-                    "no_prediction_no_guarantee": "D5 – No Prediction / Guarantee",
-                    "groundedness": "D6 – Groundedness",
-                }
+            with st.expander("Judge output (raw)"):
 
-                rows = []
+                st.markdown("""
+                    **This output is generated by the LLM-based Judge model.** It evaluates the assistant’s response on dimensions like Intent, Boundary, Risk/Disclosures, Tone, No-Prediction/No-Guarantee, and Groundedness (if RAG context exists) on 0 - 5.
+                """)
 
-                def add(label: str, value):
-                    """Append clean rows (render empty/None/[]/{} as em dash)."""
-                    if value in (None, "", [], {}, "N/A"):
-                        rows.append([label, "—"])
-                    elif isinstance(value, list):
-                        rows.append([label, ", ".join([str(x) for x in value]) or "—"])
-                    else:
-                        rows.append([label, value])
+                import re
+                import json as _json
+                import pandas as pd
 
-                # Core judge fields
-                add("Verdict", j.get("verdict"))
-                add("Overall Score", j.get("overall_score"))
-                add("Hard Fail Triggered", j.get("hard_fail_triggered"))
-                add("Hard Fail IDs", j.get("hard_fail_ids"))
+                st.markdown("### Judge Evaluation (Clean Table)")
 
-                # Dimensions (works with either D1..D6 or natural keys)
-                dims = j.get("dimension_scores") or {}
-                # If you get alternative schema like {"intent":5,...}, this still renders nicely
-                for k, v in dims.items():
-                    add(dim_map.get(k, k), v)
+                def _strip_md_fence(raw: str) -> str:
+                    """Remove ```json ... ``` fences if present."""
+                    if not isinstance(raw, str):
+                        return raw
+                    s = raw.strip()
+                    m = re.match(r"^```[a-zA-Z]*\s*(.*?)\s*```$", s, re.S)
+                    return m.group(1).strip() if m else s
 
-                # Reason codes
-                add("Reason Codes", j.get("reason_codes"))
+                # 1) Get judge_struct from the row (can be dict/str/NaN)
+                j = _as_dict_maybe_json(row.get("judge_struct"), default={})
 
-                # Rationale (explicitly included in the table)
-                add("Rationale", j.get("rationale"))
+                # 2) If it's still empty, try to derive from judge_output_raw
+                if not j or (isinstance(j, dict) and not j.keys()):
+                    raw = row.get("judge_output_raw", "")
+                    if isinstance(raw, str) and raw.strip():
+                        try:
+                            j = _json.loads(_strip_md_fence(raw))
+                        except Exception:
+                            j = {}
 
-                # Clean judge table render with fixed column widths
-                df = pd.DataFrame(rows, columns=["Metric", "Value"])
+                # If still nothing, show a friendly message and bail
+                if not j or (isinstance(j, dict) and not j.keys()):
+                    st.warning("No judge results found for this row.")
+                else:
+                    # Human‑readable dimension labels
+                    dim_map = {
+                        "D1": "D1 – Intent & Helpfulness",
+                        "D2": "D2 – Advisory Boundary",
+                        "D3": "D3 – Risk & Compliance",
+                        "D4": "D4 – Tone & Client Safety",
+                        "D5": "D5 – No Prediction / Guarantee",
+                        "D6": "D6 – Groundedness",
+                        "intent": "D1 – Intent & Helpfulness",
+                        "advisory_boundary": "D2 – Advisory Boundary",
+                        "risk_compliance": "D3 – Risk & Compliance",
+                        "tone": "D4 – Tone & Client Safety",
+                        "no_prediction_no_guarantee": "D5 – No Prediction / Guarantee",
+                        "groundedness": "D6 – Groundedness",
+                    }
 
-                # Make a nicely formatted HTML table
-                html_table = df.to_html(
-                    index=False,
-                    escape=False,
-                ).replace(
-                    "<table border=\"1\" class=\"dataframe\">",
-                    "<table style='border-collapse: collapse; width: 100%;'>"
-                ).replace(
-                    "<th>Metric</th>",
-                    "<th style='text-align:left; white-space:nowrap; padding:6px; width:300px;'>Metric</th>"
-                ).replace(
-                    "<td>",
-                    "<td style='text-align:left; vertical-align:top; padding:6px; white-space:normal;'>"
-                )
+                    rows = []
 
-                st.markdown(html_table, unsafe_allow_html=True)
+                    def add(label: str, value):
+                        if value in (None, "", [], {}, "N/A"):
+                            rows.append([label, "—"])
+                        elif isinstance(value, list):
+                            rows.append([label, ", ".join([str(x) for x in value]) or "—"])
+                        else:
+                            rows.append([label, value])
+
+                    add("Verdict", j.get("verdict"))
+                    add("Overall Score", j.get("overall_score"))
+                    add("Hard Fail Triggered", j.get("hard_fail_triggered"))
+                    add("Hard Fail IDs", j.get("hard_fail_ids"))
+
+                    dims = j.get("dimension_scores") or {}
+                    for k, v in dims.items():
+                        add(dim_map.get(k, k), v)
+
+                    add("Reason Codes", j.get("reason_codes"))
+                    add("Rationale", j.get("rationale"))
+
+                    df_judge = pd.DataFrame(rows, columns=["Metric", "Value"])
+
+                    html_table = df_judge.to_html(
+                        index=False,
+                        escape=False,
+                    ).replace(
+                        "<table border=\"1\" class=\"dataframe\">",
+                        "<table style='border-collapse: collapse; width: 100%;'>"
+                    ).replace(
+                        "<th>Metric</th>",
+                        "<th style='text-align:left; white-space:nowrap; padding:6px; width:300px;'>Metric</th>"
+                    ).replace(
+                        "<td>",
+                        "<td style='text-align:left; vertical-align:top; padding:6px; white-space:normal;'>"
+                    )
+
+                    st.markdown(html_table, unsafe_allow_html=True)
 
 else:
     st.subheader("Policy &amp; SOP Browser")

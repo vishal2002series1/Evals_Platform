@@ -113,13 +113,115 @@ if page == "Run Evaluation":
     use_judge = col2.checkbox("Use LLM Judge", value=True)
     run_btn = col3.button("Run Now", type="primary")
 
+    # if run_btn:
+    #     with st.spinner("Running batch evaluation..."):
+    #         out = api_post("/run", {"limit": int(limit), "use_judge": bool(use_judge)})
+    #     st.success(f"Run complete: {out['run_id']}")
+    #     # Save the new artifact paths to session state
+    #     st.session_state["latest_jsonl"] = out["results_jsonl"]
+    #     st.session_state["latest_csv"] = out["results_csv"]
+    #     st.write("Artifacts")
+    #     st.code(out["results_jsonl"])
+    #     st.code(out["results_csv"])
+    #     st.info("Tip: Go to Results Explorer to load these files and drill down.")
+
     if run_btn:
-        with st.spinner("Running batch evaluation..."):
-            out = api_post("/run", {"limit": int(limit), "use_judge": bool(use_judge)})
-        st.success(f"Run complete: {out['run_id']}")
+        import uuid
+        import csv
+        
+        # 1. Fetch config to locate the dataset
+        cfg = api_get("/config")
+        dataset_path = ROOT / cfg["paths"]["dataset"]
+        
+        with open(dataset_path, "r", encoding="utf-8") as f:
+            dataset = json.load(f)
+            
+        queries_to_run = dataset["queries"][:int(limit)]
+        total = len(queries_to_run)
+        
+        # 2. Initialize UI elements for progress tracking
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # 3. Setup output files
+        run_id = f"run_{uuid.uuid4().hex[:10]}"
+        out_dir = ROOT / "outputs"
+        out_dir.mkdir(exist_ok=True)
+        
+        jsonl_path = out_dir / f"{run_id}.jsonl"
+        csv_path = out_dir / f"{run_id}.csv"
+        
+        csv_rows = []
+        
+        # 4. Loop through queries and evaluate one-by-one
+        with open(jsonl_path, "w", encoding="utf-8") as jf:
+            for i, item in enumerate(queries_to_run):
+                # Update status text
+                status_text.text(f"Evaluating {i+1} of {total}...")
+                
+                # Call the backend for a single evaluation using query_id
+                res = api_post("/evaluate", {"query_id": item["id"], "use_judge": bool(use_judge)})
+                
+                # Write to JSONL
+                record = {
+                    "run_id": run_id,
+                    "query_id": item["id"],
+                    "category": item["category"],
+                    **res
+                }
+                jf.write(json.dumps(record, ensure_ascii=False) + "\n")
+                
+                # Prepare CSV row data
+                h = res.get("heuristic", {})
+                j = res.get("judge_struct", {})
+                
+                def _as_str(val):
+                    if val is None: return ""
+                    if isinstance(val, str): return val
+                    try: return json.dumps(val, ensure_ascii=False)
+                    except: return str(val)
+                
+                csv_rows.append({
+                    "query_id": item["id"],
+                    "category": item["category"],
+                    "hard_fail": bool(h.get("hard_fail_ids", [])),
+                    "hard_fail_ids": ";".join(h.get("hard_fail_ids", [])),
+                    "tone_score": (h.get("tone") or {}).get("tone_score", 0),
+                    "prediction_flag": bool((h.get("no_prediction") or {}).get("prediction_flags")),
+                    "guarantee_flag": (h.get("no_guarantee") or {}).get("count", 0) > 0,
+                    "disclaimer_required": ("DISCLAIM" in item["tags"]),
+                    "disclaimer_present": (h.get("disclosures") or {}).get("disclaimer_present"),
+                    "judge_verdict": j.get("verdict"),
+                    "judge_score": j.get("overall_score"),
+                    "judge_hard_fail": j.get("hard_fail_triggered"),
+                    "judge_output_raw": _as_str(res.get("judge_output_raw")),
+                    "judge_prompt": _as_str(res.get("judge_prompt")),
+                    "candidate_response": _as_str(res.get("candidate_response")),
+                    "sop_snippets": _as_str(res.get("sop_snippets")),
+                })
+                
+                # Update progress bar
+                progress_bar.progress((i + 1) / total)
+                
+        # 5. Write out the compiled CSV file
+        with open(csv_path, "w", encoding="utf-8", newline="") as cf:
+            writer = csv.DictWriter(cf, fieldnames=list(csv_rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(csv_rows)
+            
+        status_text.text("Batch evaluation complete! ✅")
+        
+        # 6. Save relative paths to session state so Results Explorer auto-fills
+        rel_jsonl = f"outputs/{jsonl_path.name}"
+        rel_csv = f"outputs/{csv_path.name}"
+        
+        st.session_state["latest_jsonl"] = rel_jsonl
+        st.session_state["latest_csv"] = rel_csv
+        
+        st.success(f"Run complete: {run_id}")
         st.write("Artifacts")
-        st.code(out["results_jsonl"])
-        st.code(out["results_csv"])
+        st.code(rel_jsonl)
+        st.code(rel_csv)
         st.info("Tip: Go to Results Explorer to load these files and drill down.")
 
 
@@ -544,8 +646,12 @@ elif page == "Results Explorer":
     st.subheader("Results Explorer")
     st.caption("Load JSONL or CSV produced by the batch run.")
 
-    jsonl_path = st.text_input("Path to results.jsonl", value="outputs/results.jsonl")
-    csv_path = st.text_input("Path to results.csv", value="outputs/results.csv")
+    # Fetch from session state if available, otherwise fallback to defaults
+    default_jsonl = st.session_state.get("latest_jsonl", "outputs/results.jsonl")
+    default_csv = st.session_state.get("latest_csv", "outputs/results.csv")
+
+    jsonl_path = st.text_input("Path to results.jsonl", value=default_jsonl)
+    csv_path = st.text_input("Path to results.csv", value=default_csv)
 
     col1, col2 = st.columns(2)
     if col1.button("Load JSONL"):

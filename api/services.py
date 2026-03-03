@@ -252,15 +252,6 @@ def evaluate_one(
         sop_parts.append("")  # newline
      sop_snippets = "\n".join(sop_parts).strip()
     
-    # If your clause_lookup is nested, use:
-    # sop_snippets = "\n".join(
-    #     "\n".join(v) if isinstance(v, list) else str(v)
-    #     for v in assets["clause_lookup"].values()
-    # )
-
-    # Option B (alternative): Load full policy text instead
-    # sop_snippets = dump_yaml(assets["policy"])
-
     # -----------------------------------
     # CANDIDATE GENERATION (OPTIONAL)
     # -----------------------------------
@@ -632,3 +623,58 @@ def get_goldens() -> Dict[str, Any]:
 def get_redteam() -> Dict[str, Any]:
     rt = load_yaml("redteam/wealth_redteam_pack_v1.yaml")
     return {"version": rt["redteam_metadata"]["version"], "packs": rt["packs"]}
+
+
+# ============================================================
+#  SEMANTIC ROUTING (AUTO-TAG SUGGESTER)
+# ============================================================
+
+# Global memory cache to prevent reloading the model on every API call
+_EMBEDDING_MODEL = None
+_GOLDEN_EMBEDDINGS = None
+_GOLDEN_ITEMS = None
+
+def _get_embedding_model():
+    global _EMBEDDING_MODEL
+    if _EMBEDDING_MODEL is None:
+        from sentence_transformers import SentenceTransformer
+        # Loads a tiny, blazingly fast local embedding model
+        _EMBEDDING_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+    return _EMBEDDING_MODEL
+
+def suggest_tags(query: str) -> Dict[str, Any]:
+    global _GOLDEN_EMBEDDINGS, _GOLDEN_ITEMS
+    import numpy as np
+    from numpy.linalg import norm
+    
+    model = _get_embedding_model()
+    
+    # Load goldens and precompute embeddings once on server boot
+    if _GOLDEN_ITEMS is None:
+        golden_data = load_json("goldens/wealth_goldens_v1.json")
+        _GOLDEN_ITEMS = golden_data.get("items", [])
+        
+        # Precompute embeddings for the golden queries
+        queries = [item["query"] for item in _GOLDEN_ITEMS]
+        _GOLDEN_EMBEDDINGS = model.encode(queries)
+    
+    # Embed the incoming user query
+    query_embedding = model.encode([query])[0]
+    
+    # Calculate cosine similarities against all golden vectors
+    dot_products = np.dot(_GOLDEN_EMBEDDINGS, query_embedding)
+    norms_goldens = norm(_GOLDEN_EMBEDDINGS, axis=1)
+    norm_query = norm(query_embedding)
+    
+    similarities = dot_products / (norms_goldens * norm_query)
+    
+    # Find the absolute best match
+    best_idx = np.argmax(similarities)
+    best_score = similarities[best_idx]
+    best_item = _GOLDEN_ITEMS[best_idx]
+    
+    return {
+        "suggested_tags": best_item.get("expected_tags", []),
+        "matched_query": best_item.get("query", ""),
+        "similarity_score": float(best_score)
+    }

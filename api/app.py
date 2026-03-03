@@ -3,8 +3,9 @@ from api.schemas import (
     EvaluateRequest, EvaluateResponse,
     BatchRunRequest, BatchRunResponse,
     GoldensResponse, RedteamResponse,
+    SuggestTagsRequest, SuggestTagsResponse
 )
-from api.services import evaluate_one, run_batch, get_goldens, get_redteam
+from api.services import evaluate_one, run_batch, get_goldens, get_redteam, suggest_tags
 from api.utils import load_yaml
 from dotenv import load_dotenv
 
@@ -72,3 +73,11 @@ def goldens():
 @app.get("/redteam", response_model=RedteamResponse)
 def redteam():
     return get_redteam()
+
+
+# --- NEW ENDPOINT FOR AUTO-TAGGING ---
+@app.post("/suggest_tags", response_model=SuggestTagsResponse)
+def api_suggest_tags(req: SuggestTagsRequest):
+    if not req.query:
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
+    return suggest_tags(req.query)

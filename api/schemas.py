@@ -63,3 +63,13 @@ class GoldensResponse(BaseModel):
 class RedteamResponse(BaseModel):
     version: str
     packs: List[Dict[str, Any]]
+
+
+# --- NEW SCHEMAS FOR AUTO-TAGGING ---
+class SuggestTagsRequest(BaseModel):
+    query: str
+
+class SuggestTagsResponse(BaseModel):
+    suggested_tags: List[str]
+    matched_query: str
+    similarity_score: float

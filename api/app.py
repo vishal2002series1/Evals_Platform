@@ -1,4 +1,11 @@
+import os
 from fastapi import FastAPI, HTTPException
+from dotenv import load_dotenv
+
+# 1. LOAD ENV VARS FIRST BEFORE ANYTHING ELSE!
+load_dotenv()
+
+# 2. NOW IMPORT LOCAL MODULES
 from api.schemas import (
     EvaluateRequest, EvaluateResponse,
     BatchRunRequest, BatchRunResponse,
@@ -7,10 +14,6 @@ from api.schemas import (
 )
 from api.services import evaluate_one, run_batch, get_goldens, get_redteam, suggest_tags
 from api.utils import load_yaml
-from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
 
 app = FastAPI(title="Wealth LLM Evaluation API", version="1.0")
 
@@ -23,6 +26,11 @@ def health():
 @app.get("/config")
 def config():
     cfg = load_yaml("run_config.yaml")
+    
+    # Inject active feature flags into the config payload
+    cfg["features"] = {
+        "observability_xray": os.getenv("ENABLE_OBSERVABILITY_XRAY", "false").lower() == "true"
+    }
     return cfg
 
 

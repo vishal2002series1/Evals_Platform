@@ -1,13 +1,42 @@
+import os
 import re
 import uuid
 import csv
 import json
+from functools import wraps
 from typing import Any, Dict, List, Tuple, Optional
 from pathlib import Path
 
 from api.utils import load_json, load_yaml, dump_yaml, ensure_outputs_dir, ROOT
 from providers.azure_openai import azure_chat_completion
 
+# ============================================================
+#  FEATURE FLAG: OBSERVABILITY X-RAY
+# ============================================================
+ENABLE_XRAY = os.getenv("ENABLE_OBSERVABILITY_XRAY", "false").lower() == "true"
+
+if ENABLE_XRAY:
+    from langfuse.decorators import observe, langfuse_context
+    from langfuse import Langfuse
+else:
+    # Pluggable Dummy Logic: If disabled, safely ignore @observe wrappers
+    def observe(*args, **kwargs):
+        def decorator(func):
+            @wraps(func)
+            def wrapper(*f_args, **f_kwargs):
+                return func(*f_args, **f_kwargs)
+            return wrapper
+        return decorator
+
+    class DummyContext:
+        def update_current_observation(self, **kwargs): pass
+        def update_current_trace(self, **kwargs): pass
+
+    class DummyLangfuse:
+        def flush(self): pass
+
+    langfuse_context = DummyContext()
+    Langfuse = DummyLangfuse
 
 def _as_str(value) -> str:
     if value is None:
@@ -160,27 +189,35 @@ def render_template(template_text: str, vars_dict: Dict[str, Any]) -> str:
 #  MODEL CALL HELPERS
 # ============================================================
 
+@observe(as_type="generation")
 def call_azure(cfg, prompt, override_model=None):
+    langfuse_context.update_current_observation(input=prompt)
     try:
         from providers.azure_openai import azure_chat_completion
     except Exception as e:
         return {"error": "azure_import_failed", "exception": str(e), "filtered": False}
 
     try:
-        return azure_chat_completion(cfg, prompt)
+        res = azure_chat_completion(cfg, prompt)
+        langfuse_context.update_current_observation(output=res)
+        return res
     except Exception as e:
         es = str(e)
         if ("ResponsibleAIPolicyViolation" in es or "content_filter" in es or "jailbreak" in es):
             return {"error": "azure_filter_triggered", "filtered": True, "exception": es}
         return {"error": "azure_call_failed", "filtered": False, "exception": es}
 
+@observe(as_type="generation")
 def call_candidate(model_cfg, prompt: str):
+    langfuse_context.update_current_observation(input=prompt)
     try:
         from providers.azure_openai import azure_chat_completion
     except Exception as e:
         return {"error": "candidate_import_failed", "exception": str(e)}
     try:
-        return azure_chat_completion(model_cfg, prompt)
+        res = azure_chat_completion(model_cfg, prompt)
+        langfuse_context.update_current_observation(output=res)
+        return res
     except Exception as e:
         return {"error": "candidate_call_failed", "exception": str(e)}
 
@@ -214,6 +251,7 @@ def load_core_assets() -> Dict[str, Any]:
 #  EVALUATE ONE  (FINAL)
 # ============================================================
 
+@observe()
 def evaluate_one(
     query: str,
     expected_tags: List[str],
@@ -223,6 +261,12 @@ def evaluate_one(
     candidate_model_override: Optional[str],
     judge_model_override: Optional[str],
 ) -> Dict[str, Any]:
+
+    langfuse_context.update_current_trace(
+        name="evaluate_wealth_query",
+        input={"query": query, "expected_tags": expected_tags},
+        tags=expected_tags
+    )
 
     # -----------------------------------
     # LOAD ASSETS / CONFIG
@@ -246,7 +290,6 @@ def evaluate_one(
     if not sop_snippets or sop_snippets.strip() == "":
      sop_parts = []
      for meta in assets["clause_lookup"].values():
-        # meta = {"sop_id": ..., "sop_title": ..., "text": ...}
         sop_parts.append(f"[{meta['sop_id']} {meta['sop_title']}]")
         sop_parts.append(f"- {meta['text']}")
         sop_parts.append("")  # newline
@@ -374,36 +417,27 @@ Optional Context:
 
                 s = raw.strip()
 
-                # Strip ```json fences
                 if s.startswith("```"):
                     s = s.strip("`")
                     s = s.replace("json", "", 1).strip()
 
-                # Load as JSON
                 try:
                     return json.loads(s)
                 except Exception:
                     return {}
         print("JUDGE RAW:", judge_output_raw)
-        # Convert stub
         if isinstance(judge_output_raw, str) and judge_output_raw.strip() == "[MODEL_CALL_STUB]":
             judge_output_raw = {"error": "internal_stub_detected", "note": "Stub replaced"}
 
-        # ----------------------------
-# PARSE JUDGE OUTPUT (robust)
-# ----------------------------
         raw = judge_output_raw
 
-# strip markdown ```json fences
         if isinstance(raw, str) and raw.strip().startswith("```"):
-    # remove opening and closing ```json fences
             cleaned = raw.strip()
             cleaned = cleaned.removeprefix("```json").removeprefix("```")
             cleaned = cleaned.removesuffix("```").strip()
         else:
             cleaned = raw
 
-# load JSON
         try:
             judge_struct = cleaned if isinstance(cleaned, dict) else json.loads(cleaned)
         except Exception:
@@ -418,7 +452,6 @@ Optional Context:
             "raw": raw,
              }
 
-        # Mark judge errors
         if "error" in judge_struct:
             heuristic.setdefault("llm_judge", {})
             heuristic["llm_judge"]["status"] = "error"
@@ -436,7 +469,6 @@ Optional Context:
     judge_output_raw = _as_str(judge_output_raw)
     judge_prompt = _as_str(judge_prompt)
 
-# MERGE Heuristic + Judge Hard-Fail IDs# ----------------------------
     heur_hf = heuristic.get("hard_fail_ids", []) or []
     judge_hf = judge_struct.get("hard_fail_ids", []) or []
 
@@ -446,25 +478,17 @@ Optional Context:
     judge_struct["hard_fail_triggered"] = bool(merged_hf_ids)
     hard_fail = bool(merged_hf_ids)
     
-
-# If ANY heuristic HF fires → force judge hard_fail
     judge_output_raw = _as_str(judge_output_raw)
     judge_prompt = _as_str(judge_prompt)
 
-# ----------------------------
-# Build unified RAI Judgement (for /evaluate JSON only)
-# ----------------------------
-# 1) Final HF = union(heuristics, judge)
     heur_hf = heuristic.get("hard_fail_ids", []) or []
     judge_hf = (judge_struct or {}).get("hard_fail_ids", []) or []
     final_hf_ids = sorted(set(heur_hf + judge_hf))
     final_hf = bool(final_hf_ids)
 
-# 2) Final verdict: FAIL if any hard-fail, else judge verdict (default PASS)
     judge_verdict = (judge_struct or {}).get("verdict", "PASS") or "PASS"
     final_verdict = "FAIL" if final_hf else str(judge_verdict).upper()
 
-# 3) Heuristic summary (lightweight, safe if keys missing)
     heur_summary = {
       "tone_score": (heuristic.get("tone") or {}).get("tone_score"),
       "guarantee_count": (heuristic.get("no_guarantee") or {}).get("count"),
@@ -492,24 +516,22 @@ Optional Context:
                 },
                     }
     
+    langfuse_context.update_current_trace(output=rai_judgement)
+    if ENABLE_XRAY:
+        langfuse_context.flush()
+
     return {
         "query": query,
         "expected_tags": expected_tags,
         "candidate_response": candidate_response,
          "sop_snippets": sop_snippets,
          "sop_clause_ids": sop_clause_ids,
-
-    # keep existing shapes for alignment with CSV/JSONL
         "heuristic": heuristic,
         "judge_struct": judge_struct,
         "judge_output_raw": judge_output_raw,
         "judge_prompt": judge_prompt,
-
-    # merged flags you already use elsewhere
         "hard_fail": final_hf,
         "hard_fail_ids": final_hf_ids,
-
-    # NEW: single place to read the full combined decision
         "rai_judgement": rai_judgement,
         }
        
@@ -556,7 +578,6 @@ def run_batch(limit: int, use_judge: bool) -> Dict[str, Any]:
                 judge_model_override=None,
             )
 
-            # 1) Write full JSONL record
             record = {
                 "run_id": run_id,
                 "query_id": item["id"],
@@ -565,15 +586,12 @@ def run_batch(limit: int, use_judge: bool) -> Dict[str, Any]:
             }
             jf.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-            # 2) Extract fields for CSV (aligned with JSON & JSONL)
             h = r.get("heuristic", {})
             j = r.get("judge_struct", {})
 
             rows.append({
                 "query_id": item["id"],
                 "category": item["category"],
-
-                # --- Heuristic ---
                 "hard_fail": bool(h.get("hard_fail_ids", [])),
                 "hard_fail_ids": ";".join(h.get("hard_fail_ids", [])),
                 "tone_score": (h.get("tone") or {}).get("tone_score", 0),
@@ -581,29 +599,22 @@ def run_batch(limit: int, use_judge: bool) -> Dict[str, Any]:
                 "guarantee_flag": (h.get("no_guarantee") or {}).get("count", 0) > 0,
                 "disclaimer_required": ("DISCLAIM" in item["tags"]),
                 "disclaimer_present": (h.get("disclosures") or {}).get("disclaimer_present"),
-
-                # --- Judge ---
                 "judge_verdict": j.get("verdict"),
                 "judge_score": j.get("overall_score"),
                 "judge_hard_fail": j.get("hard_fail_triggered"),
-
-                # --- Raw judge strings (sanitized) ---
                 "judge_output_raw": _as_str(r.get("judge_output_raw")),
                 "judge_prompt": _as_str(r.get("judge_prompt")),
-
-                # --- Candidate (sanitized) ---
                 "candidate_response": _as_str(r.get("candidate_response")),
-
-                # --- SOP Snippets ---
                 "sop_snippets": _as_str(r.get("sop_snippets")),
             })
 
-    # 3) Write CSV (clean, aligned)
     import csv
     with csv_path.open("w", encoding="utf-8", newline="") as cf:
         writer = csv.DictWriter(cf, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
+
+    Langfuse().flush()
 
     return {
         "run_id": run_id,
@@ -629,7 +640,6 @@ def get_redteam() -> Dict[str, Any]:
 #  SEMANTIC ROUTING (AUTO-TAG SUGGESTER)
 # ============================================================
 
-# Global memory cache to prevent reloading the model on every API call
 _EMBEDDING_MODEL = None
 _GOLDEN_EMBEDDINGS = None
 _GOLDEN_ITEMS = None
@@ -638,7 +648,6 @@ def _get_embedding_model():
     global _EMBEDDING_MODEL
     if _EMBEDDING_MODEL is None:
         from sentence_transformers import SentenceTransformer
-        # Loads a tiny, blazingly fast local embedding model
         _EMBEDDING_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
     return _EMBEDDING_MODEL
 
@@ -649,26 +658,21 @@ def suggest_tags(query: str) -> Dict[str, Any]:
     
     model = _get_embedding_model()
     
-    # Load goldens and precompute embeddings once on server boot
     if _GOLDEN_ITEMS is None:
         golden_data = load_json("goldens/wealth_goldens_v1.json")
         _GOLDEN_ITEMS = golden_data.get("items", [])
         
-        # Precompute embeddings for the golden queries
         queries = [item["query"] for item in _GOLDEN_ITEMS]
         _GOLDEN_EMBEDDINGS = model.encode(queries)
     
-    # Embed the incoming user query
     query_embedding = model.encode([query])[0]
     
-    # Calculate cosine similarities against all golden vectors
     dot_products = np.dot(_GOLDEN_EMBEDDINGS, query_embedding)
     norms_goldens = norm(_GOLDEN_EMBEDDINGS, axis=1)
     norm_query = norm(query_embedding)
     
     similarities = dot_products / (norms_goldens * norm_query)
     
-    # Find the absolute best match
     best_idx = np.argmax(similarities)
     best_score = similarities[best_idx]
     best_item = _GOLDEN_ITEMS[best_idx]

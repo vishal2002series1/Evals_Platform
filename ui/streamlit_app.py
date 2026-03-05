@@ -95,10 +95,31 @@ page = st.sidebar.radio(
         "Run Evaluation",
         "Evaluate Single",
         "Results Explorer",
-        "Policy & SOP Browser"
     ],
-    key="current_page" # This links the radio button to the session state
+    key="current_page" 
 )
+
+# --- DYNAMIC FEATURE TOGGLES ---
+try:
+    sys_cfg = requests.get(f"{API}/config", timeout=5).json()
+    features = sys_cfg.get("features", {})
+    xray_enabled = features.get("observability_xray", False)
+except Exception:
+    xray_enabled = False
+
+if xray_enabled:
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### Observability")
+    st.sidebar.markdown(
+        """
+        <a href="http://localhost:3000" target="_blank" style="text-decoration: none;">
+            <button style="width: 100%; padding: 8px; background-color: #2b2b2b; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                👁️ Open Tracing Studio
+            </button>
+        </a>
+        """, 
+        unsafe_allow_html=True
+    )
 
 def api_get(path):
     r = requests.get(f"{API}{path}", timeout=120)
@@ -117,7 +138,6 @@ def api_post(path, payload):
 if page == "Run Evaluation":
     st.subheader("Batch Run")
     
-    # Initialize run states if they don't exist
     if "run_status_text" not in st.session_state:
         st.session_state["run_status_text"] = ""
     if "run_progress" not in st.session_state:
@@ -130,19 +150,16 @@ if page == "Run Evaluation":
     use_judge = col2.checkbox("Use LLM Judge", value=True)
     run_btn = col3.button("Run Now", type="primary")
 
-    # Persistent placeholders for UI elements
     progress_bar = st.progress(st.session_state["run_progress"])
     status_text = st.empty()
     status_text.text(st.session_state["run_status_text"])
     
-    # Display artifacts if a run was previously completed
     if st.session_state["run_complete"]:
         st.success(f"Run complete: {st.session_state.get('last_run_id', '')}")
         st.write("Artifacts")
         st.code(st.session_state.get('latest_jsonl', ''))
         st.code(st.session_state.get('latest_csv', ''))
         
-        # The button that jumps to Results Explorer
         st.button(
             "📊 View Results in Explorer", 
             type="primary", 
@@ -153,12 +170,10 @@ if page == "Run Evaluation":
         import uuid
         import csv
         
-        # Reset state for new run
         st.session_state["run_complete"] = False
         st.session_state["run_progress"] = 0.0
         progress_bar.progress(0.0)
         
-        # 1. Fetch config to locate the dataset
         cfg = api_get("/config")
         dataset_path = ROOT / cfg["paths"]["dataset"]
         
@@ -168,7 +183,6 @@ if page == "Run Evaluation":
         queries_to_run = dataset["queries"][:int(limit)]
         total = len(queries_to_run)
         
-        # 3. Setup output files
         run_id = f"run_{uuid.uuid4().hex[:10]}"
         st.session_state["last_run_id"] = run_id
         
@@ -180,18 +194,14 @@ if page == "Run Evaluation":
         
         csv_rows = []
         
-        # 4. Loop through queries and evaluate one-by-one
         with open(jsonl_path, "w", encoding="utf-8") as jf:
             for i, item in enumerate(queries_to_run):
-                # Update status text in UI and State
                 msg = f"Evaluating {i+1} of {total}..."
                 status_text.text(msg)
                 st.session_state["run_status_text"] = msg
                 
-                # Call the backend for a single evaluation using query_id
                 res = api_post("/evaluate", {"query_id": item["id"], "use_judge": bool(use_judge)})
                 
-                # Write to JSONL
                 record = {
                     "run_id": run_id,
                     "query_id": item["id"],
@@ -200,7 +210,6 @@ if page == "Run Evaluation":
                 }
                 jf.write(json.dumps(record, ensure_ascii=False) + "\n")
                 
-                # Prepare CSV row data
                 h = res.get("heuristic", {})
                 j = res.get("judge_struct", {})
                 
@@ -229,12 +238,10 @@ if page == "Run Evaluation":
                     "sop_snippets": _as_str(res.get("sop_snippets")),
                 })
                 
-                # Update progress bar in UI and State
                 current_progress = (i + 1) / total
                 progress_bar.progress(current_progress)
                 st.session_state["run_progress"] = current_progress
                 
-        # 5. Write out the compiled CSV file
         with open(csv_path, "w", encoding="utf-8", newline="") as cf:
             writer = csv.DictWriter(cf, fieldnames=list(csv_rows[0].keys()))
             writer.writeheader()
@@ -244,7 +251,6 @@ if page == "Run Evaluation":
         status_text.text(final_msg)
         st.session_state["run_status_text"] = final_msg
         
-        # 6. Save relative paths to session state so Results Explorer auto-fills
         rel_jsonl = f"outputs/{jsonl_path.name}"
         rel_csv = f"outputs/{csv_path.name}"
         
@@ -252,7 +258,6 @@ if page == "Run Evaluation":
         st.session_state["latest_csv"] = rel_csv
         st.session_state["run_complete"] = True
         
-        # Rerun to cleanly display the artifacts and the new "View Results" button
         st.rerun()
 
 elif page == "Evaluate Single":
@@ -262,13 +267,12 @@ elif page == "Evaluate Single":
     if mode == "By query text":
         query = st.text_area("Query", height=90, placeholder="Type a client question...")
         
-        # --- NEW: AUTO DETECT TAGS BUTTON ---
         if st.button("✨ Auto-Detect Tags"):
             if query.strip():
                 with st.spinner("Finding semantic match..."):
                     res = api_post("/suggest_tags", {"query": query})
                     st.session_state["auto_tags"] = res["suggested_tags"]
-                    st.success(f"Debug :: Matched with: \"{res['matched_query']}\" (Confidence: {res['similarity_score']:.2f})")
+                    st.success(f"✅ Matched with: \"{res['matched_query']}\" (Confidence: {res['similarity_score']:.2f})")
             else:
                 st.warning("Please enter a query first.")
         
@@ -312,7 +316,6 @@ elif page == "Evaluate Single":
             "PII_SAFE",
         ]
 
-        # Initialize default tags in session state if not present
         if "auto_tags" not in st.session_state:
             st.session_state["auto_tags"] = ["EDU_ONLY", "PROCESS_FRAMING"]
 
@@ -352,12 +355,6 @@ elif page == "Evaluate Single":
             st.markdown("### Candidate Response")
             st.write(out["candidate_response"])
 
-            # ---------------------------
-            # CLEAN JUDGE TABLE (Evaluate Single)
-            # ---------------------------
-            # -------------------------------------------
-            # HEURISTIC JUDGEMENT (Clean Table)
-            # -------------------------------------------
             st.markdown("## 🟦 Heuristic Evaluation")
             st.markdown("""
                 **This output is generated by the Heuristic Evaluation**
@@ -373,7 +370,6 @@ elif page == "Evaluate Single":
 
             h = out.get("heuristic", {}) or {}
 
-            # Build rows
             hrows = []
 
             def hadd(label, value):
@@ -384,7 +380,6 @@ elif page == "Evaluate Single":
                 else:
                     hrows.append([label, value])
 
-            # Key heuristic indicators
             adv = h.get("advisory_boundary", {})
             tone = h.get("tone", {})
             pred = h.get("no_prediction", {})
@@ -406,7 +401,6 @@ elif page == "Evaluate Single":
 
             df_h = pd.DataFrame(hrows, columns=["Metric", "Value"])
 
-            # Render heuristics table with fixed metric column width
             html_h = df_h.to_html(
                 index=False,
                 escape=False,
@@ -423,9 +417,6 @@ elif page == "Evaluate Single":
 
             st.markdown(html_h, unsafe_allow_html=True)
 
-            # -------------------------------------------
-            # JUDGE EVALUATION (Clean Table)
-            # -------------------------------------------
             st.markdown("## 🟩 LLM Judge Evaluation")
 
             st.markdown("""
@@ -436,7 +427,6 @@ elif page == "Evaluate Single":
 
             j = out.get("judge_struct") or {}
 
-            # Allow judge_struct to be JSON string
             if isinstance(j, str):
                 s = j.strip()
                 m = re.match(r"^```[a-zA-Z]*\s*(.*?)\s*```$", s, re.S)
@@ -447,7 +437,6 @@ elif page == "Evaluate Single":
                 except Exception:
                     j = {"raw": j}
 
-            # Human readable dimension labels (use plain & so the browser renders cleanly)
             dim_map = {
                 "D1": "D1 – Intent & Helpfulness",
                 "D2": "D2 – Advisory Boundary",
@@ -472,19 +461,16 @@ elif page == "Evaluate Single":
                 else:
                     jrows.append([label, value])
 
-            # Main judge fields
             jadd("Verdict", j.get("verdict"))
             jadd("Overall Score", j.get("overall_score"))
             jadd("Hard Fail Triggered", j.get("hard_fail_triggered"))
             jadd("Hard Fail IDs", j.get("hard_fail_ids"))
 
-            # ---- Dimensions (robust normalization) ----
             dims = j.get("dimension_scores") or {}
 
-            # If the judge returned dimensions as a JSON string (sometimes fenced), parse it.
             if isinstance(dims, str):
                 s = dims.strip()
-                m = re.match(r"^```[a-zA-Z]*\s*(.*?)\s* কলকাতায়```$", s, re.S)  # strip ```json ... ```
+                m = re.match(r"^```[a-zA-Z]*\s*(.*?)\s*```$", s, re.S)
                 if m:
                     s = m.group(1).strip()
                 try:
@@ -492,19 +478,15 @@ elif page == "Evaluate Single":
                 except Exception:
                     dims = {}
 
-            # Now render dimensions (works with D1..D6 or natural keys)
             if isinstance(dims, dict):
                 for k, v in dims.items():
                     jadd(dim_map.get(k, k), v if v not in (None, "") else "—")
 
-            # Reason codes
             jadd("Reason Codes", j.get("reason_codes"))
-            # Rationale
             jadd("Rationale", j.get("rationale"))
 
             df_j = pd.DataFrame(jrows, columns=["Metric", "Value"])
 
-            # Render judge table with fixed metric column
             html_j = df_j.to_html(
                 index=False,
                 escape=False,
@@ -546,9 +528,6 @@ elif page == "Evaluate Single":
             """)
             st.json(out["heuristic"])
 
-            # -------------------------------------------
-            # JUDGE EVALUATION (Clean Table)
-            # -------------------------------------------
             st.markdown("## 🟩 LLM Judge Evaluation")
             st.markdown("""
                 **This output is generated by the LLM-based Judge model.** It evaluates the assistant’s response on dimensions like Intent, Boundary, Risk/Disclosures, Tone, No-Prediction/No-Guarantee, and Groundedness (if RAG context exists) on 0 - 5.
@@ -558,7 +537,6 @@ elif page == "Evaluate Single":
 
             j = out.get("judge_struct") or {}
 
-            # Allow judge_struct to be JSON string
             if isinstance(j, str):
                 s = j.strip()
                 m = re.match(r"^```[a-zA-Z]*\s*(.*?)\s*```$", s, re.S)
@@ -569,7 +547,6 @@ elif page == "Evaluate Single":
                 except Exception:
                     j = {"raw": j}
 
-            # Human readable dimension labels
             dim_map = {
                 "D1": "D1 – Intent & Helpfulness",
                 "D2": "D2 – Advisory Boundary",
@@ -594,13 +571,11 @@ elif page == "Evaluate Single":
                 else:
                     jrows.append([label, value])
 
-            # Main judge fields
             jadd("Verdict", j.get("verdict"))
             jadd("Overall Score", j.get("overall_score"))
             jadd("Hard Fail Triggered", j.get("hard_fail_triggered"))
             jadd("Hard Fail IDs", j.get("hard_fail_ids"))
 
-            # ---- Dimensions ----
             dims = j.get("dimension_scores") or {}
 
             if isinstance(dims, str):
@@ -617,14 +592,11 @@ elif page == "Evaluate Single":
                 for k, v in dims.items():
                     jadd(dim_map.get(k, k), v if v not in (None, "") else "—")
 
-            # Reason codes
             jadd("Reason Codes", j.get("reason_codes"))
-            # Rationale
             jadd("Rationale", j.get("rationale"))
 
             df_j = pd.DataFrame(jrows, columns=["Metric", "Value"])
 
-            # Render judge table with fixed metric column
             html_j = df_j.to_html(
                 index=False,
                 escape=False,
@@ -641,9 +613,6 @@ elif page == "Evaluate Single":
 
             st.markdown(html_j, unsafe_allow_html=True)
 
-            # --------------------------------------------
-            # PATCH 2 — Show Unified RAI Judgement
-            # --------------------------------------------
             if out.get("rai_judgement"):
                 st.markdown("### 🧭 RAI Judgement (Combined View)")
                 st.json(out["rai_judgement"])
@@ -651,7 +620,6 @@ elif page == "Evaluate Single":
                     st.markdown("### Judge Output (Structured)")
                     judge_data = out["judge_struct"]
                     
-                    # Flatten the nested structure into a table format
                     table_data = []
                     for dimension, details in judge_data.items():
                         if isinstance(details, dict):
@@ -672,7 +640,6 @@ elif page == "Results Explorer":
     st.subheader("Results Explorer")
     st.caption("Load JSONL or CSV produced by the batch run.")
 
-    # Fetch from session state if available, otherwise fallback to defaults
     default_jsonl = st.session_state.get("latest_jsonl", "outputs/results.jsonl")
     default_csv = st.session_state.get("latest_csv", "outputs/results.csv")
 
@@ -685,9 +652,6 @@ elif page == "Results Explorer":
     if col2.button("Load CSV"):
         st.session_state["df_csv"] = pd.read_csv(csv_path)
 
-    # ==========================================
-    # CSV SUMMARY SECTION
-    # ==========================================
     if "df_csv" in st.session_state:
         st.markdown("### Summary (CSV)")
         st.markdown("""
@@ -700,7 +664,6 @@ elif page == "Results Explorer":
         """)
         dfc = st.session_state["df_csv"]
 
-        # --- FIX: normalize problematic string columns ---
         def _norm_str_col(df, col):
             if col in df.columns:
                 df[col] = df[col].astype(str).replace({"nan": ""}).fillna("")
@@ -716,9 +679,6 @@ elif page == "Results Explorer":
 
         st.dataframe(dfc, use_container_width=True)
 
-    # ==========================================
-    # JSONL DRILLDOWN SECTION
-    # ==========================================
     if "df_jsonl" in st.session_state:
         st.markdown("### Drilldown (JSONL)")
         df = st.session_state["df_jsonl"]
@@ -730,7 +690,7 @@ elif page == "Results Explorer":
         if cat != "(all)":
             dff = dff[dff["category"] == cat]
         if hard != "(all)":
-            dff = dff[dff["hard_fail"] == hard] # Fix: Use dff instead of df here to stack filters
+            dff = dff[dff["hard_fail"] == hard]
 
         if dff.empty:
             st.warning("No results match the selected filters.")
@@ -751,19 +711,11 @@ elif page == "Results Explorer":
             st.markdown("#### Candidate Response")
             st.write(row.get("candidate_response", ""))
 
-            # ---------- SAFE PARSER HELPERS ----------
             def _as_dict_maybe_json(value, default=None):
-                """
-                Returns a dict from either:
-                  - already-a-dict input
-                  - JSON string input
-                  - None/NaN (returns default)
-                """
                 if default is None:
                     default = {}
                 if value is None:
                     return default
-                # For pandas rows, NaN can appear; treat as missing
                 try:
                     import math
                     if isinstance(value, float) and math.isnan(value):
@@ -796,17 +748,14 @@ elif page == "Results Explorer":
                 st.markdown("### Judge Evaluation (Clean Table)")
 
                 def _strip_md_fence(raw: str) -> str:
-                    """Remove ```json ... ``` fences if present."""
                     if not isinstance(raw, str):
                         return raw
                     s = raw.strip()
                     m = re.match(r"^```[a-zA-Z]*\s*(.*?)\s*```$", s, re.S)
                     return m.group(1).strip() if m else s
 
-                # 1) Get judge_struct from the row (can be dict/str/NaN)
                 j = _as_dict_maybe_json(row.get("judge_struct"), default={})
 
-                # 2) If it's still empty, try to derive from judge_output_raw
                 if not j or (isinstance(j, dict) and not j.keys()):
                     raw = row.get("judge_output_raw", "")
                     if isinstance(raw, str) and raw.strip():
@@ -815,11 +764,9 @@ elif page == "Results Explorer":
                         except Exception:
                             j = {}
 
-                # If still nothing, show a friendly message and bail
                 if not j or (isinstance(j, dict) and not j.keys()):
                     st.warning("No judge results found for this row.")
                 else:
-                    # Human‑readable dimension labels
                     dim_map = {
                         "D1": "D1 – Intent & Helpfulness",
                         "D2": "D2 – Advisory Boundary",
@@ -874,10 +821,3 @@ elif page == "Results Explorer":
                     )
 
                     st.markdown(html_table, unsafe_allow_html=True)
-
-elif page == "Policy & SOP Browser":
-    st.subheader("Policy & SOP Browser")
-    cfg = api_get("/config")
-
-    st.markdown("### run_config.yaml")
-    st.code(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True, width=120))

@@ -1,0 +1,28 @@
+services:
+  langfuse:
+    image: langfuse/langfuse:2  # <-- Pinned to V2!
+    depends_on:
+      - db
+    ports:
+      - "3000:3000"
+    environment:
+      - "DATABASE_URL=postgresql://postgres:postgres@db:5432/postgres"
+      - "NEXTAUTH_SECRET=my_local_secret_key_123!"
+      - "SALT=my_local_salt_123!"
+      - "NEXTAUTH_URL=http://localhost:3000"
+      - "TELEMETRY_ENABLED=false"
+      - "NODE_ENV=production"
+
+  db:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    environment:
+      - "POSTGRES_USER=postgres"
+      - "POSTGRES_PASSWORD=postgres"
+      - "POSTGRES_DB=postgres"
+    volumes:
+      - langfuse-db-data:/var/lib/postgresql/data
+
+volumes:
+  langfuse-db-data:

@@ -26,8 +26,9 @@ services:
       - "NEXTAUTH_URL=http://localhost:3000"
       - "TELEMETRY_ENABLED=false"
       - "NODE_ENV=production"
-      - "LANGFUSE_UI_LOGO_LIGHT_MODE_HREF=http://localhost:8080/ey_logo.png"
-      - "LANGFUSE_UI_LOGO_DARK_MODE_HREF=http://localhost:8080/ey_logo.png"
+      # --- White-labeling Langfuse with Public EY Logo ---
+      - "LANGFUSE_UI_LOGO_LIGHT_MODE_HREF=https://upload.wikimedia.org/wikipedia/commons/thumb/3/34/EY_logo_2019.svg/512px-EY_logo_2019.svg.png"
+      - "LANGFUSE_UI_LOGO_DARK_MODE_HREF=https://upload.wikimedia.org/wikipedia/commons/thumb/3/34/EY_logo_2019.svg/512px-EY_logo_2019.svg.png"
 
   # 3. Your FastAPI Backend
   evals-api:

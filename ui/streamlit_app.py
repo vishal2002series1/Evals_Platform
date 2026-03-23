@@ -108,6 +108,7 @@ page = st.sidebar.radio(
         "Evaluate Single",
         "Results Explorer",
         "Judge Studio",
+        "Custom Client Views",
         "Policy & SOP Browser"
     ],
     key="current_page"
@@ -392,3 +393,96 @@ elif page == "Policy & SOP Browser":
     st.subheader("Policy & SOP Browser")
     cfg = api_get("/config")
     st.code(yaml.safe_dump(cfg, sort_keys=False))
+
+elif page == "Custom Client Views":
+    st.subheader("📈 Live Telemetry Dashboard")
+    st.markdown("Directly querying the Langfuse PostgreSQL database for real-time evaluation metrics across all runs.")
+    
+    import altair as alt
+    from sqlalchemy import create_engine
+    
+    # Cache the DB query so it doesn't freeze the UI, but refresh every 60 seconds
+    @st.cache_data(ttl=60)
+    def load_langfuse_data():
+        # Connect to the Postgres container inside the Docker network
+        engine = create_engine("postgresql+pg8000://postgres:postgres@db:5432/postgres")
+        
+        # SQL Query joining the traces and scores tables
+        query = """
+            SELECT 
+                t.name as judge_name,
+                t.timestamp as timestamp,
+                s.name as metric_name,
+                s.value as metric_value
+            FROM traces t
+            JOIN scores s ON t.id = s.trace_id
+            WHERE t.name LIKE 'Eval:%'
+        """
+        try:
+            return pd.read_sql(query, engine)
+        except Exception as e:
+            return pd.DataFrame({"error": [str(e)]})
+            
+    with st.spinner("Fetching live data from PostgreSQL..."):
+        df = load_langfuse_data()
+        
+    if df.empty:
+        st.info("No scores found in the database yet. Run an evaluation!")
+    elif "error" in df.columns:
+        st.error(f"Database connection error: {df['error'].iloc[0]}")
+    else:
+        # Data wrangling
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        
+        # --- DYNAMIC METRIC CARDS ---
+        st.markdown("### 🎯 Live Aggregated Scores")
+        metric_names = [m for m in df['metric_name'].unique() if m != "Hard_Fail"]
+        
+        # Create dynamic columns for metrics
+        cols = st.columns(min(4, len(metric_names) + 2))
+        
+        # Total Evaluations Metric
+        total_evals = df['timestamp'].nunique()
+        cols[0].metric("Total AI Evaluations", total_evals)
+        
+        # Hard Fail Rate Metric
+        if "Hard_Fail" in df['metric_name'].values:
+            fail_rate = df[df['metric_name'] == 'Hard_Fail']['metric_value'].mean() * 100
+            cols[1].metric("Overall Hard Fail Rate", f"{fail_rate:.1f}%")
+            
+        # Dynamic Custom Judge Metrics
+        col_idx = 2
+        for m_name in metric_names:
+            if col_idx < 4:
+                avg_val = df[df['metric_name'] == m_name]['metric_value'].mean()
+                cols[col_idx].metric(f"Avg {m_name.replace('Judge_', '').replace('_', ' ').title()}", round(avg_val, 2))
+                col_idx += 1
+                
+        st.markdown("---")
+        
+        # --- CUSTOM CHART BUILDER WIDGET ---
+        st.markdown("### 🛠️ Real-Time Metric Explorer")
+        c1, c2 = st.columns(2)
+        
+        selected_metric = c1.selectbox("Select Metric to Visualize", options=df['metric_name'].unique())
+        chart_type = c2.selectbox("Chart Type", ["Time Series (Line)", "Judge Comparison (Bar)"])
+        
+        filtered_df = df[df['metric_name'] == selected_metric]
+        
+        if chart_type == "Time Series (Line)":
+            chart = alt.Chart(filtered_df).mark_line(point=True).encode(
+                x=alt.X("timestamp:T", title="Time of Evaluation"),
+                y=alt.Y("metric_value:Q", title=selected_metric.replace('Judge_', '')),
+                color=alt.Color("judge_name:N", title="Judge ID"),
+                tooltip=["judge_name", "timestamp", "metric_value"]
+            ).properties(height=400).interactive()
+            st.altair_chart(chart, use_container_width=True)
+            
+        elif chart_type == "Judge Comparison (Bar)":
+            chart = alt.Chart(filtered_df).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+                x=alt.X("judge_name:N", title="Judge ID", sort='-y'),
+                y=alt.Y("mean(metric_value):Q", title=f"Average {selected_metric.replace('Judge_', '')}"),
+                color=alt.Color("judge_name:N", legend=None),
+                tooltip=["judge_name", alt.Tooltip("mean(metric_value):Q", format=".2f")]
+            ).properties(height=400).interactive()
+            st.altair_chart(chart, use_container_width=True)

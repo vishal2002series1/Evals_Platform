@@ -9,3 +9,5 @@ streamlit==1.31.1
 requests==2.31.0
 sentence-transformers
 numpy
+SQLAlchemy
+pg8000

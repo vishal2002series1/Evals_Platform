@@ -26,6 +26,8 @@ services:
       - "NEXTAUTH_URL=http://localhost:3000"
       - "TELEMETRY_ENABLED=false"
       - "NODE_ENV=production"
+      - "LANGFUSE_UI_LOGO_LIGHT_MODE_HREF=http://localhost:8080/ey_logo.png"
+      - "LANGFUSE_UI_LOGO_DARK_MODE_HREF=http://localhost:8080/ey_logo.png"
 
   # 3. Your FastAPI Backend
   evals-api:

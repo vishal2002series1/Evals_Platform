@@ -48,6 +48,14 @@ services:
       - .env
     depends_on:
       - evals-api
+  # 5. The EY GDS Portal (Nginx Wrapper)
+  portal:
+    build: ./portal
+    ports:
+      - "8080:80"
+    depends_on:
+      - evals-ui
+      - langfuse
 
 volumes:
   langfuse-data-vol:

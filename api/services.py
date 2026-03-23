@@ -506,15 +506,16 @@ Optional Context:
             input=query,
             output=candidate_response
         )
-        langfuse_context.score(name="Tone_Score", value=heur_summary.get("tone_score", 0))
-        langfuse_context.score(name="Hard_Fail", value=1 if final_hf else 0)
+        # FIX: Changed .score() to .score_current_trace()
+        langfuse_context.score_current_trace(name="Tone_Score", value=heur_summary.get("tone_score", 0))
+        langfuse_context.score_current_trace(name="Hard_Fail", value=1 if final_hf else 0)
         
         # safely handle 'overall_score'
         overall_score = judge_struct.get("overall_score")
         if overall_score is not None:
             try:
                 score_val = float(overall_score)
-                langfuse_context.score(name="Judge_Overall", value=score_val)
+                langfuse_context.score_current_trace(name="Judge_Overall", value=score_val)
             except ValueError:
                 pass
         

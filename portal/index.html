@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EY GDS | Monitoring Platform</title>
+    <style>
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; height: 100vh; overflow: hidden; background-color: #f4f6f8; }
+        /* The EY Sidebar */
+        .sidebar { width: 260px; background-color: #2e2e38; color: white; display: flex; flex-direction: column; box-shadow: 2px 0 5px rgba(0,0,0,0.1); z-index: 10; }
+        .logo-container { padding: 20px; background-color: #1a1a24; border-bottom: 1px solid #3f3f4e; text-align: center; }
+        .logo-container h2 { margin: 0; font-size: 18px; letter-spacing: 1px; color: #ffe600; font-weight: 600; }
+        .logo-container p { margin: 5px 0 0 0; font-size: 11px; color: #a0a0b0; text-transform: uppercase; letter-spacing: 0.5px; }
+        .nav-items { flex-grow: 1; padding: 15px 0; }
+        .nav-item { padding: 15px 25px; cursor: pointer; transition: 0.2s; font-size: 14px; display: flex; align-items: center; border-left: 4px solid transparent; }
+        .nav-item:hover { background-color: #3f3f4e; }
+        .nav-item.active { background-color: #3f3f4e; border-left: 4px solid #ffe600; font-weight: 600; }
+        .nav-item span.icon { margin-right: 12px; font-size: 16px; }
+        /* The Main Iframe Container */
+        .content { flex-grow: 1; position: relative; }
+        iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="logo-container">
+            <h2>EY GDS</h2>
+            <p>Monitoring Platform</p>
+        </div>
+        <div class="nav-items">
+            <div class="nav-item active" onclick="switchTab('studio', this)">
+                Evaluation Studio
+            </div>
+            <div class="nav-item" onclick="switchTab('observability', this)">
+                EY Monitoring
+            </div>
+        </div>
+    </div>
+
+    <div class="content">
+        <iframe id="main-frame" src="/studio/"></iframe>
+    </div>
+
+    <script>
+        function switchTab(tab, element) {
+            // Update active styling
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
+            
+            // Switch iframe source
+            const frame = document.getElementById('main-frame');
+            if (tab === 'studio') {
+                frame.src = '/studio/';
+            } else if (tab === 'observability') {
+                frame.src = '/observability/';
+            }
+        }
+    </script>
+</body>
+</html>

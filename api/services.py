@@ -2,11 +2,13 @@ import re
 import uuid
 import csv
 import json
+import os
 from typing import Any, Dict, List, Tuple, Optional
 from pathlib import Path
 
 from api.utils import load_json, load_yaml, dump_yaml, ensure_outputs_dir, ROOT
 from providers.azure_openai import azure_chat_completion
+from langfuse.decorators import observe, langfuse_context
 
 
 def _as_str(value) -> str:
@@ -160,6 +162,7 @@ def render_template(template_text: str, vars_dict: Dict[str, Any]) -> str:
 #  MODEL CALL HELPERS
 # ============================================================
 
+@observe(as_type="generation")
 def call_azure(cfg, prompt, override_model=None):
     try:
         from providers.azure_openai import azure_chat_completion
@@ -174,6 +177,7 @@ def call_azure(cfg, prompt, override_model=None):
             return {"error": "azure_filter_triggered", "filtered": True, "exception": es}
         return {"error": "azure_call_failed", "filtered": False, "exception": es}
 
+@observe(as_type="generation")
 def call_candidate(model_cfg, prompt: str):
     try:
         from providers.azure_openai import azure_chat_completion
@@ -214,6 +218,7 @@ def load_core_assets() -> Dict[str, Any]:
 #  EVALUATE ONE  (FINAL)
 # ============================================================
 
+@observe()
 def evaluate_one(
     query: str,
     expected_tags: List[str],
@@ -492,6 +497,29 @@ Optional Context:
                 },
                     }
     
+    # ----------------------------
+    # TELEMETRY PUSH TO LANGFUSE
+    # ----------------------------
+    if os.getenv("ENABLE_OBSERVABILITY_XRAY", "false").lower() == "true":
+        langfuse_context.update_current_trace(
+            name="Evaluate Single",
+            input=query,
+            output=candidate_response
+        )
+        langfuse_context.score(name="Tone_Score", value=heur_summary.get("tone_score", 0))
+        langfuse_context.score(name="Hard_Fail", value=1 if final_hf else 0)
+        
+        # safely handle 'overall_score'
+        overall_score = judge_struct.get("overall_score")
+        if overall_score is not None:
+            try:
+                score_val = float(overall_score)
+                langfuse_context.score(name="Judge_Overall", value=score_val)
+            except ValueError:
+                pass
+        
+        langfuse_context.flush()
+
     return {
         "query": query,
         "expected_tags": expected_tags,

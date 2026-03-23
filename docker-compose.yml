@@ -1,0 +1,53 @@
+services:
+  # 1. The Database
+  db:
+    image: postgres:15
+    ports:
+      - "5433:5432"
+    environment:
+      - "POSTGRES_USER=postgres"
+      - "POSTGRES_PASSWORD=postgres"
+      - "POSTGRES_DB=postgres"
+      - "PGDATA=/var/lib/postgresql/data/pgdata"
+    volumes:
+      - langfuse-data-vol:/var/lib/postgresql/data
+
+  # 2. The Langfuse Dashboard
+  langfuse:
+    image: langfuse/langfuse:2
+    depends_on:
+      - db
+    ports:
+      - "3000:3000"
+    environment:
+      - "DATABASE_URL=postgresql://postgres:postgres@db:5432/postgres"
+      - "NEXTAUTH_SECRET=my_local_secret_key_123!"
+      - "SALT=my_local_salt_123!"
+      - "NEXTAUTH_URL=http://localhost:3000"
+      - "TELEMETRY_ENABLED=false"
+      - "NODE_ENV=production"
+
+  # 3. Your FastAPI Backend
+  evals-api:
+    build: .
+    command: python3 -m uvicorn api.app:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - langfuse
+
+  # 4. Your Streamlit Frontend
+  evals-ui:
+    build: .
+    command: streamlit run ui/streamlit_app.py --server.port 8501 --server.address 0.0.0.0 --server.enableCORS=false --server.enableXsrfProtection=false
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    depends_on:
+      - evals-api
+
+volumes:
+  langfuse-data-vol:

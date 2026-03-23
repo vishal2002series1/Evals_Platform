@@ -80,7 +80,7 @@ def go_to_results():
 # ================================
 #   API SETTINGS
 # ================================
-API = st.sidebar.text_input("API Base URL", value="http://localhost:8000")
+API = st.sidebar.text_input("API Base URL", value=os.getenv("API_URL", "http://evals-api:8000"))
 
 st.title("Wealth LLM Evaluation Workbench")
 

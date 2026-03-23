@@ -20,6 +20,8 @@ class EvaluateRequest(BaseModel):
     candidate_model_name: Optional[str] = None
     judge_model_name: Optional[str] = None
 
+    judge_id: Optional[str] = "judge_default_v1"
+
 
 class EvaluateResponse(BaseModel):
     query_id: Optional[int] = None

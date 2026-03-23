@@ -1,0 +1,18 @@
+{
+  "id": "judge_1432ac3d",
+  "name": "EY Empathy Auditor",
+  "description": "Grades responses based on client empathy and professional tone.",
+  "system_prompt": "You are an EY Quality Assurance Auditor. \nRead the User Query: {{user_query}} \nRead the Assistant Response: {{assistant_response}}\n\nEvaluate if the assistant showed empathy while remaining professional.",
+  "metrics": [
+    {
+      "name": "empathy_score",
+      "type": "integer",
+      "description": "Score from 1 to 5"
+    },
+    {
+      "name": "rationale",
+      "type": "integer",
+      "description": "Why did you give this score?"
+    }
+  ]
+}

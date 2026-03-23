@@ -35,6 +35,8 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    volumes:
+      - ./judges:/app/judges  # Persistent storage for your UI-created Judges
     depends_on:
       - langfuse
 
@@ -46,8 +48,11 @@ services:
       - "8501:8501"
     env_file:
       - .env
+    volumes:
+      - ./ui:/app/ui
     depends_on:
       - evals-api
+
   # 5. The EY GDS Portal (Nginx Wrapper)
   portal:
     build: ./portal
